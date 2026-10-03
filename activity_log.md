@@ -60,3 +60,33 @@
 - `python3 -m unittest discover -s tests -v`：10 tests passed。
 - `python3 -m py_compile server.py`：passed。
 - `node --check web/session.js web/app.js web/new.js`：passed。
+
+## 2026-10-03 23:20:59 +0800 — 为 Goal 看门狗接入原生恢复协议
+
+- activity_id: ACT-20261003-232059
+- modification_version: V0.2.2
+- type: code_change
+- change_level: L1
+- approval: user-approved
+- approval_basis: 用户要求确认容量错误时暂停 Goal 的特殊处理并继续实现。
+- skills_used: research-change-control, openai-docs
+- branch: main
+- base_commit: e4c3d90
+- worktree_dirty: true
+- scope: `server.py`, `tests/test_app_server.py`, `README.md`
+
+**文件**
+
+- `server.py` — 看门狗对暂停/进行中 Goal 使用 `thread/goal/get` 与 `thread/goal/set`，并在发送前重新读取会话状态；app-server 客户端支持 daemon proxy 与 Windows 队列式 stdout 读取。
+- `tests/test_app_server.py` — 增加持久化 Goal 恢复 JSON-RPC 回归测试。
+- `README.md` — 说明 Goal 恢复、预算检查和同一失败 turn 单次尝试规则。
+
+**原因**
+
+此前的 `/goal resume` 是普通文本 turn，不能保证恢复持久化 Goal。现在改为原生生命周期调用，省略 objective 和 token budget 参数以保留原目标与用量统计；完成通知即结束本次恢复，后续新失败 turn 再由看门狗处理。
+
+**验证**
+
+- `python3 -m unittest discover -s tests -v`：11 tests passed。
+- `python3 -m py_compile server.py`：passed。
+- `git diff --check`：passed。

@@ -256,21 +256,29 @@ class AppServerClient:
     deterministic if a browser disconnects.
     """
 
-    def __init__(self, home: Path):
+    def __init__(self, home: Path, use_daemon: bool = False):
         self.home = home
         self.binary = find_app_server_binary(home)
         self.process: Optional[subprocess.Popen] = None
         self.request_id = 0
         self._pending_events: List[Dict[str, Any]] = []
+        self._pending_notifications: List[Dict[str, Any]] = []
         self._stdout_queue: "queue.Queue[Optional[bytes]]" = queue.Queue()
+        self.use_daemon = use_daemon
+        self.connected_to_daemon = False
 
     def _start(self) -> None:
         if not self.binary:
             raise AppServerError("该 Home 没有可用的 Codex app-server 二进制")
         environment = os.environ.copy()
         environment["CODEX_HOME"] = str(self.home)
+        command = [str(self.binary), "app-server", "--listen", "stdio://"]
+        socket_path = self.home / "app-server-control" / "app-server-control.sock"
+        if self.use_daemon and socket_path.is_socket():
+            command = [str(self.binary), "app-server", "proxy", "--sock", str(socket_path)]
+            self.connected_to_daemon = True
         self.process = subprocess.Popen(
-            [str(self.binary), "app-server", "--listen", "stdio://"],
+            command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -354,6 +362,8 @@ class AppServerClient:
                     error = message["error"]
                     raise AppServerError(str(error.get("message") or "app-server 请求失败"))
                 return message.get("result") or {}
+            if message.get("method") and message.get("id") is None:
+                self._pending_notifications.append(message)
 
     def _initialize(self) -> None:
         self._request("initialize", {"clientInfo": {"name": "codex_home_monitor", "title": "Codex Home Monitor", "version": "0.1.0"}}, timeout=15)
@@ -362,8 +372,9 @@ class AppServerClient:
     def _start_turn(self, thread_id: str, text: str) -> Dict[str, Any]:
         return self._request("turn/start", {"threadId": thread_id, "input": [{"type": "text", "text": text}]}, timeout=30)
 
-    def _stream_turn(self, turn: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
-        yield {"type": "started", "turn": turn.get("turn") if isinstance(turn, dict) else turn}
+    def _stream_turn(self, turn: Optional[Dict[str, Any]], thread_id: str = "", follow_goal: bool = False) -> Iterable[Dict[str, Any]]:
+        if turn is not None:
+            yield {"type": "started", "turn": turn.get("turn") if isinstance(turn, dict) else turn}
         deadline = time.monotonic() + max(60, int(os.environ.get("CODEX_MONITOR_CHAT_TIMEOUT_SECONDS", "3600")))
         while True:
             while self._pending_events:
@@ -371,7 +382,7 @@ class AppServerClient:
             if time.monotonic() >= deadline:
                 raise AppServerError("app-server turn 超过最大等待时间")
             try:
-                message = self._read(30.0)
+                message = self._pending_notifications.pop(0) if self._pending_notifications else self._read(30.0)
             except AppServerTimeout:
                 yield {"type": "heartbeat"}
                 continue
@@ -382,11 +393,20 @@ class AppServerClient:
                 continue
             method = message.get("method")
             params = message.get("params") or {}
+            if thread_id and params.get("threadId") and params["threadId"] != thread_id:
+                continue
             if method == "turn/completed":
                 yield {"type": "completed", "turn": params.get("turn") or params}
+                # The completion notification closes this recovery attempt.
+                # A later capacity failure is persisted as a new turn and is
+                # picked up by the watchdog's next scan.
                 return
             if method == "error":
-                yield {"type": "error", "stage": "turn", "message": str(params.get("message") or params)}
+                if params.get("willRetry"):
+                    yield {"type": "status", "message": "app-server 正在内部重试"}
+                    continue
+                error = params.get("error") or params
+                yield {"type": "error", "stage": "turn", "message": str(error.get("message") or error)}
                 return
             if method in {"item/agentMessage/delta", "item/agentMessage/completed", "item/started", "item/completed", "item/commandExecution/outputDelta", "commandExecution/outputDelta", "turn/diff/updated", "turn/plan/updated"}:
                 yield {"type": "notification", "method": method, "params": params}
@@ -396,7 +416,32 @@ class AppServerClient:
         try:
             self._initialize()
             self._request("thread/resume", {"threadId": thread_id, "excludeTurns": True}, timeout=45)
-            yield from self._stream_turn(self._start_turn(thread_id, text))
+            yield from self._stream_turn(self._start_turn(thread_id, text), thread_id)
+        finally:
+            self.close()
+
+    def run_goal_resume(self, thread_id: str) -> Iterable[Dict[str, Any]]:
+        """Resume the persisted Goal through its lifecycle API, not user text."""
+        self._start()
+        try:
+            self._initialize()
+            self._request("thread/resume", {"threadId": thread_id, "excludeTurns": True}, timeout=45)
+            goal = self._request("thread/goal/get", {"threadId": thread_id}).get("goal") or {}
+            if goal.get("status") not in {"paused", "active"}:
+                yield {"type": "skipped", "message": "Goal 不处于可恢复状态"}
+                return
+            budget = goal.get("tokenBudget")
+            if budget is not None and (goal.get("tokensUsed") or 0) >= budget:
+                yield {"type": "skipped", "message": "Goal 预算已耗尽"}
+                return
+            # Omitting objective and tokenBudget preserves accounting. The
+            # native dispatcher starts continuation when status becomes active.
+            result = self._request("thread/goal/set", {"threadId": thread_id, "status": "active"})
+            resumed = result.get("goal") or {}
+            if resumed.get("status") != "active":
+                raise AppServerError("Goal 恢复接口未返回 active 状态")
+            yield {"type": "goal_resumed", "goal": resumed}
+            yield from self._stream_turn(None, thread_id, follow_goal=True)
         finally:
             self.close()
 
@@ -801,6 +846,11 @@ class WatchdogManager:
                     continue
                 if not turn.get("capacity_error"):
                     continue
+                goal = session.get("goal") or {}
+                if goal and goal.get("status") not in {"active", "running", "paused"}:
+                    continue
+                if session.get("archived"):
+                    continue
                 last_activity_ms = turn.get("last_activity_ms")
                 # Do not bootstrap from failures that predate this monitor
                 # process. Only failures observed during this run are eligible.
@@ -815,7 +865,9 @@ class WatchdogManager:
                     if state.get("fingerprint") != fingerprint:
                         state.update({"fingerprint": fingerprint, "attempts": 0, "next_at": now + self.interval_seconds})
                         self._record({"type": "detected", "key": key, "message": "检测到暂时的模型容量错误，等待后重试"})
-                    if key in self._jobs or now < float(state.get("next_at") or 0):
+                    # One attempt per failed turn. Retry again only after a
+                    # new capacity failure, never by replaying a stale error.
+                    if state["attempts"] or key in self._jobs or now < float(state.get("next_at") or 0):
                         continue
                     state["attempts"] = int(state.get("attempts") or 0) + 1
                     state["next_at"] = now + self.interval_seconds
@@ -824,15 +876,37 @@ class WatchdogManager:
                 worker.start()
 
     def _run_job(self, reader: HomeReader, session: Dict[str, Any], key: str) -> None:
-        goal = session.get("goal") or {}
-        message = "/goal resume" if goal.get("status") in {"active", "paused", "running"} else "继续"
         writer_key: Optional[str] = None
+        action = "继续"
         try:
             writer_key = self.monitor._acquire_writer(session["home_id"], session["thread_id"])
+            # Re-read just before sending: the user may have resumed, paused,
+            # completed, or archived the session while we waited a minute.
+            current = next((item for item in reader.sessions() if item["thread_id"] == session["thread_id"]), None)
+            expected_turn = session.get("latest_turn") or {}
+            latest = (current or {}).get("latest_turn") or {}
+            if (not self.enabled or not current or current.get("archived")
+                    or latest.get("turn_id") != expected_turn.get("turn_id")
+                    or str(latest.get("status") or "").lower() not in {"failed", "error", "errored"}
+                    or not latest.get("capacity_error")):
+                self._record({"type": "skipped", "key": key, "message": "会话状态已变化或看门狗已关闭"})
+                return
+            goal = current.get("goal") or {}
+            if goal and goal.get("status") not in {"active", "running", "paused"}:
+                self._record({"type": "skipped", "key": key, "message": "Goal 不处于可恢复状态"})
+                return
+            client = AppServerClient(reader.path, use_daemon=True)
+            action = "恢复 Goal" if goal else "继续"
+            events = client.run_goal_resume(session["thread_id"]) if goal else client.run_turn(session["thread_id"], "继续")
             failed = False
-            for event in AppServerClient(reader.path).run_turn(session["thread_id"], message):
-                failed = failed or event.get("type") == "error"
-            self._record({"type": "completed" if not failed else "error", "key": key, "message": message})
+            skipped = False
+            for event in events:
+                if event.get("type") in {"goal_resumed", "error", "skipped"}:
+                    self._record({"type": event["type"], "key": key, "message": event.get("message") or action})
+                failed = failed or event.get("type") == "error" or (event.get("type") == "completed" and (event.get("turn") or {}).get("status") == "failed")
+                skipped = skipped or event.get("type") == "skipped"
+            if not skipped:
+                self._record({"type": "completed" if not failed else "error", "key": key, "message": action})
         except Exception as exc:
             self._record({"type": "error", "key": key, "message": str(exc)})
         finally:

@@ -15,6 +15,7 @@ from server import AppServerClient, AppServerError
 FAKE_SERVER = textwrap.dedent('''\
     #!/usr/bin/env python3
     import json, sys
+    goal_status = "paused"
     for line in sys.stdin:
         request = json.loads(line)
         method = request.get("method")
@@ -24,6 +25,13 @@ FAKE_SERVER = textwrap.dedent('''\
             print(json.dumps({"id": request["id"], "result": {"thread": {"id": request["params"]["threadId"]}}}), flush=True)
         elif method == "thread/start":
             print(json.dumps({"id": request["id"], "result": {"thread": {"id": "thread-new"}}}), flush=True)
+        elif method == "thread/goal/get":
+            print(json.dumps({"id": request["id"], "result": {"goal": {"threadId": request["params"]["threadId"], "objective": "Keep testing", "status": goal_status, "tokensUsed": 2, "tokenBudget": 100}}}), flush=True)
+        elif method == "thread/goal/set":
+            goal_status = request["params"].get("status") or goal_status
+            print(json.dumps({"id": request["id"], "result": {"goal": {"threadId": request["params"]["threadId"], "objective": "Keep testing", "status": goal_status, "tokensUsed": 2, "tokenBudget": 100}}}), flush=True)
+            print(json.dumps({"method": "thread/goal/updated", "params": {"threadId": request["params"]["threadId"]}}), flush=True)
+            print(json.dumps({"method": "turn/completed", "params": {"turn": {"id": "goal-turn", "status": "completed"}, "threadId": request["params"]["threadId"]}}), flush=True)
         elif method == "turn/start":
             print(json.dumps({"id": request["id"], "result": {"turn": {"id": "turn-1"}}}), flush=True)
             print(json.dumps({"method": "item/agentMessage/delta", "params": {"delta": "hello"}}), flush=True)
@@ -59,6 +67,18 @@ class AppServerTests(unittest.TestCase):
             self.assertEqual(events[0]["type"], "created")
             self.assertEqual(events[0]["thread_id"], "thread-new")
             self.assertEqual(events[-1]["type"], "completed")
+
+    def test_goal_resume_uses_persisted_goal_rpc(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fake = Path(directory) / "codex"
+            fake.write_text(FAKE_SERVER)
+            fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+            with patch("server.find_app_server_binary", return_value=fake):
+                events = list(AppServerClient(Path(directory)).run_goal_resume("thread-goal"))
+            self.assertEqual(events[0]["type"], "goal_resumed")
+            self.assertEqual(events[0]["goal"]["status"], "active")
+            self.assertEqual(events[-1]["type"], "completed")
+            self.assertNotIn("started", [event["type"] for event in events])
 
 
 if __name__ == "__main__":

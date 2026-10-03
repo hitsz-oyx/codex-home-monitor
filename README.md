@@ -71,7 +71,7 @@ python3 server.py --host 0.0.0.0 --port 8787
 
 详情页默认只读取最新 200 个 item 并定位到末尾；在 transcript 顶部继续滚动会通过 `before_created_at_ms` 分页读取更早内容。命令执行默认折叠，直接对话区放在 transcript 下方。
 
-看门狗默认关闭，可在首页点击“看门狗：关闭”启用，也可以设置 `CODEX_MONITOR_WATCHDOG=1` 默认启用。它只处理监控进程启动后、最近 15 分钟内产生的 `serverOverloaded`、`Selected model is at capacity` 等临时模型容量错误，等待至少 60 秒后发送一次“继续”；如果会话有进行中或暂停的 Goal，则发送 `/goal resume`。账户用量、配额、上下文长度和速率限制错误不会自动重试，进程启动前遗留的历史容量错误也不会自动触发。
+看门狗默认关闭，可在首页点击“看门狗：关闭”启用，也可以设置 `CODEX_MONITOR_WATCHDOG=1` 默认启用。它只处理监控进程启动后、最近 15 分钟内产生的 `serverOverloaded`、`Selected model is at capacity` 等临时模型容量错误，等待至少 60 秒后发送一次“继续”。如果会话有进行中或暂停的 Goal，则通过 `thread/goal/get` 检查状态，再用 `thread/goal/set` 将状态恢复为 `active`；不会把 `/goal resume` 当作普通文本发送。Goal 已完成、预算耗尽或用量受限时跳过。账户用量、配额、上下文长度和速率限制错误不会自动重试，进程启动前遗留的历史容量错误也不会自动触发；同一个失败 turn 只尝试一次，只有产生新的失败 turn 才会再次触发。
 
 ## app-server 可行性检查
 
@@ -81,7 +81,7 @@ python3 server.py --host 0.0.0.0 --port 8787
 - `.codex_oyx_NewAPI`：0.159.3
 - `.codex_oyx_API`：没有 managed app-server 二进制
 
-每个已运行的 Home 都有独立的 `app-server-control.sock`。独立 stdio app-server 的 JSON-RPC 流程已验证：`initialize` → `initialized` → `thread/resume` 可以正常工作。当前实现为每次发送启动一个独立 app-server 进程，完成后退出；如果目标线程已经被其他 writer 占用，页面会收到明确错误，需要先在原 Codex 客户端中结束当前 turn。
+每个已运行的 Home 都有独立的 `app-server-control.sock`。独立 stdio app-server 的 JSON-RPC 流程已验证：`initialize` → `initialized` → `thread/resume` 可以正常工作；Goal 看门狗还会调用 `thread/goal/get` 和 `thread/goal/set`，保留原有 objective、token budget 和用量统计。看门狗优先通过 Home 的 daemon proxy 发送恢复操作；没有可用 socket 时回退到独立 stdio app-server。普通直接对话仍然是每次发送启动一个独立 app-server 进程，完成后退出；如果目标线程已经被其他 writer 占用，页面会收到明确错误，需要先在原 Codex 客户端中结束当前 turn。
 
 ## 验证
 
