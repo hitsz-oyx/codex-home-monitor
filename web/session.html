@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>会话详情 · Codex Home Monitor</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="shell session-shell">
+    <header class="topbar">
+      <div class="brand"><div class="brand-mark"><span></span><span></span><span></span></div><div><div class="eyebrow">CODEX THREAD</div><h1>会话详情</h1></div></div>
+      <div class="top-actions"><a class="back-link" href="/">← 返回会话列表</a><span id="connection" class="connection"><i></i>读取中</span></div>
+    </header>
+    <main>
+      <section id="session-header" class="session-hero"><div class="empty">正在读取会话…</div></section>
+      <section class="detail-layout">
+        <div class="transcript-column panel"><div class="panel-heading"><div><p class="eyebrow">TRANSCRIPT</p><h3>会话内容</h3></div><span id="content-count" class="sort-note"></span></div><div id="transcript" class="transcript"><div class="empty">正在解析 item_json…</div></div></div>
+        <aside class="session-side">
+          <section id="goal-card" class="panel side-card"></section>
+          <section id="meta-card" class="panel side-card"></section>
+        </aside>
+      </section>
+      <section class="panel chat-card chat-panel"><div class="detail-label">DIRECT CHAT</div><h3>直接对话</h3><p>消息会通过对应 Home 的 app-server 发送。命令或文件审批暂时自动拒绝。</p><form id="chat-form"><textarea id="chat-input" rows="4" maxlength="20000" placeholder="给这个会话发送消息…"></textarea><button id="chat-send" type="submit">发送消息</button></form><div id="chat-status" class="chat-status"></div><div id="live-reply" class="live-reply"></div></section>
+    </main>
+    <footer><span>SQLite 只读监控 · reasoning 项默认隐藏</span><span id="refresh-note">内容按需读取</span></footer>
+  </div>
+  <script src="/session.js"></script>
+</body>
+</html>

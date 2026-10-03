@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>新建对话 · Codex Home Monitor</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="shell new-shell">
+    <header class="topbar">
+      <div class="brand"><div class="brand-mark"><span></span><span></span><span></span></div><div><div class="eyebrow">NEW CODEX THREAD</div><h1>新建对话</h1></div></div>
+      <div class="top-actions"><a class="back-link" href="/">← 返回会话列表</a><span id="connection" class="connection"><i></i>准备中</span></div>
+    </header>
+    <main>
+      <section class="new-hero"><p class="eyebrow">START A FRESH THREAD</p><h2>新建一个 Codex 会话</h2><p class="subcopy">选择 Home 后发送第一条消息。会话创建完成后会自动进入独立详情页。</p></section>
+      <section class="new-card panel">
+        <form id="new-form">
+          <label>Codex Home<select id="home" required><option value="">正在读取 Home…</option></select></label>
+          <label>第一条消息<textarea id="message" rows="8" maxlength="20000" required placeholder="告诉 Codex 要做什么…"></textarea></label>
+          <div class="new-grid"><label>模型（可选）<input id="model" maxlength="200" placeholder="留空使用 Home 默认模型"></label><label>工作目录（可选）<input id="cwd" maxlength="2000" placeholder="例如 /home2/wyy/oyx_ws"></label></div>
+          <div class="new-actions"><a class="ghost-button link-button" href="/">取消</a><button id="new-send" type="submit">创建并发送</button></div>
+        </form>
+        <div id="new-status" class="chat-status"></div><div id="live-reply" class="live-reply"></div>
+      </section>
+    </main>
+    <footer><span>创建线程通过对应 Home 的 app-server 完成</span><span>命令或文件审批暂时自动拒绝</span></footer>
+  </div>
+  <script src="/new.js"></script>
+</body>
+</html>

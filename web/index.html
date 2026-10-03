@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codex Home Monitor</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark"><span></span><span></span><span></span></div>
+        <div><div class="eyebrow">OPERATIONS CONSOLE</div><h1>Codex Home Monitor</h1></div>
+      </div>
+      <div class="top-actions"><a class="ghost-button link-button" href="/new.html">新建对话</a><button id="watchdog" class="ghost-button" type="button">看门狗：关闭</button><span id="connection" class="connection"><i></i>连接中</span><button id="refresh" class="ghost-button">刷新</button></div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div><p class="eyebrow">MULTI-HOME OVERVIEW</p><h2>会话工作台</h2><p class="subcopy">聚合多个 Codex Home，按最近活动追踪线程与 Goal。</p></div>
+        <div class="updated-box"><span>上次同步</span><strong id="last-sync">—</strong></div>
+      </section>
+
+      <section id="stats" class="stats-grid"></section>
+
+      <section class="toolbar panel">
+        <div class="toolbar-row">
+          <div id="home-filters" class="home-filters"></div>
+          <label class="search"><span>⌕</span><input id="search" type="search" placeholder="搜索标题、目录、模型…"></label>
+        </div>
+        <div class="toolbar-row second"><div id="goal-filters" class="status-filters"></div><span id="result-count" class="muted"></span></div>
+      </section>
+
+      <section class="workspace">
+        <div class="session-column panel"><div class="panel-heading"><div><p class="eyebrow">RECENT THREADS</p><h3>最近会话</h3></div><span class="sort-note">点击会话进入独立详情页</span></div><div id="sessions" class="session-list"><div class="empty">正在读取会话…</div></div></div>
+      </section>
+    </main>
+    <footer><span>只读监控 · 不会修改 Codex Home</span><span id="refresh-note"></span></footer>
+  </div>
+  <script>window.CODEX_MONITOR_REFRESH_SECONDS = 5;</script>
+  <script src="/app.js"></script>
+</body>
+</html>
